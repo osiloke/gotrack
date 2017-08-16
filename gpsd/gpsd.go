@@ -5,62 +5,57 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"sync/atomic"
 	"time"
+
+	gas "github.com/firstrow/goautosocket"
 )
 
-//DefaultAddress gps address
 const DefaultAddress = "localhost:2947"
 
-//Filter defines a function which is called for every message type
 type Filter func(interface{})
 
-//Session connection to the gps serial
 type Session struct {
 	socket         net.Conn
 	reader         *bufio.Reader
 	filters        map[string][]Filter
-	clientStopChan chan struct{}
+	running        bool
+	closeWatchChan chan bool
+	closeWaitChan  chan bool
+	shutdownChan   chan bool
 }
 
-//Mode is the gps mode
 type Mode byte
 
 const (
-	//NoValueSeen mode
 	NoValueSeen Mode = 0
-	//NoFix mode
-	NoFix Mode = 1
-	//Mode2D mode
-	Mode2D Mode = 2
-	//Mode3D mode
-	Mode3D Mode = 3
+	NoFix       Mode = 1
+	Mode2D      Mode = 2
+	Mode3D      Mode = 3
 )
 
-//GPSDReport defines a gpsd report
 type GPSDReport struct {
 	Class string `json:"class"`
 }
 
 type TPVReport struct {
-	Class  string    `json:"class" structs:"class"`
-	Tag    string    `json:"tag" structs:"tag"`
-	Device string    `json:"device" structs:"device"`
-	Mode   Mode      `json:"mode" structs:"mode"`
-	Time   time.Time `json:"time" structs:"time"`
-	Ept    float64   `json:"ept" structs:"ept"`
-	Lat    float64   `json:"lat" structs:"lat"`
-	Lon    float64   `json:"lon" structs:"lon"`
-	Alt    float64   `json:"alt" structs:"alt"`
-	Epx    float64   `json:"epx" structs:"epx"`
-	Epy    float64   `json:"epy" structs:"epy`
-	Epv    float64   `json:"ev" structs:"ev"`
-	Track  float64   `json:"track" structs:"track"`
-	Speed  float64   `json:"speed" structs:"speed"`
-	Climb  float64   `json:"climb" "structs":"climb"`
-	Epd    float64   `json:"epd" structs:"epd"`
-	Eps    float64   `json:"eps" structs:"eps"`
-	Epc    float64   `json:"epc" structs:"epc"`
+	Class  string    `json:"class"`
+	Tag    string    `json:"tag"`
+	Device string    `json:"device"`
+	Mode   Mode      `json:"mode"`
+	Time   time.Time `json:"time"`
+	Ept    float64   `json:"ept"`
+	Lat    float64   `json:"lat"`
+	Lon    float64   `json:"lon"`
+	Alt    float64   `json:"alt"`
+	Epx    float64   `json:"epx"`
+	Epy    float64   `json:"epy"`
+	Epv    float64   `json:"epv"`
+	Track  float64   `json:"track"`
+	Speed  float64   `json:"speed"`
+	Climb  float64   `json:"climb"`
+	Epd    float64   `json:"epd"`
+	Eps    float64   `json:"eps"`
+	Epc    float64   `json:"epc"`
 }
 
 type SKYReport struct {
@@ -175,81 +170,42 @@ type Satellite struct {
 // Dial opens a new connection to GPSD.
 func Dial(address string) (session *Session, err error) {
 	session = new(Session)
-	if session.clientStopChan != nil {
-		panic("gpsd: the given gpsd is already started. Call gpsd.Stop() before calling gpsd.Dial() again!")
+	session.socket, err = gas.Dial("tcp4", address)
+	if err != nil {
+		return
 	}
-	session.clientStopChan = make(chan struct{})
-	go connectionHandler(session, address)
-	return
-}
 
-func connectionHandler(session *Session, address string) {
-	// defer c.stopWg.Done()
-
-	var conn net.Conn
-	var err error
-	var stopping atomic.Value
-
-	for {
-		dialChan := make(chan struct{})
-		go func() {
-			if conn, err = net.Dial("tcp4", address); err != nil {
-				if stopping.Load() == nil {
-					println(fmt.Sprintf("gpsd [%s]. Cannot establish serial connection: [%s]", address, err.Error()))
-				}
-			}
-			close(dialChan)
-		}()
-
-		select {
-		case <-session.clientStopChan:
-			stopping.Store(true)
-			<-dialChan
-			return
-		case <-dialChan:
-			// c.Stats.incDialCalls()
-		}
-
-		if err != nil {
-			// c.Stats.incDialErrors()
-			select {
-			case <-session.clientStopChan:
-				return
-			case <-time.After(time.Second):
-			}
-			continue
-		}
-
-		setupConnection(session, conn)
-
-		select {
-		case <-session.clientStopChan:
-			return
-		default:
-		}
-	}
-}
-
-func setupConnection(session *Session, conn net.Conn) {
-	session.socket = conn
 	session.reader = bufio.NewReader(session.socket)
 	session.reader.ReadString('\n')
 	session.filters = make(map[string][]Filter)
+	session.closeWaitChan = make(chan bool)
+	session.closeWatchChan = make(chan bool)
+	session.shutdownChan = make(chan bool)
+
+	return
 }
 
 // Starts watching GPSD reports in a new goroutine.
 //
 // Example
 //    gps := gpsd.Dial(gpsd.DEFAULT_ADDRESS)
-//    done := gpsd.Watch()
-//    <- done
-func (s *Session) Watch() {
-	fmt.Fprintf(s.socket, "?WATCH={\"enable\":true,\"json\":true}")
-	s.done = make(chan bool)
+//    gps.Watch()
+func (s *Session) Run() {
 
-	go watch(done, s)
-	<-s.done
+	go s.watch()
+
 	return
+}
+
+func (s *Session) StartWatching() {
+	fmt.Fprintf(s.socket, "?WATCH={\"enable\":true,\"json\":true}")
+}
+func (s *Session) StopWatching() {
+	fmt.Fprintf(s.socket, "?WATCH={\"enable\":false,\"json\":true}")
+	// // go func() {
+	// s.closeWatchChan <- true
+	// // }()
+	// <-s.closeWaitChan
 }
 
 func (s *Session) SendCommand(command string) {
@@ -265,8 +221,7 @@ func (s *Session) SendCommand(command string) {
 //      report := r.(*gpsd.TPVReport)
 //      fmt.Println(report.Time, report.Lat, report.Lon)
 //    })
-//    done := gps.Watch()
-//    <- done
+//    gps.Watch()
 func (s *Session) AddFilter(class string, f Filter) {
 	s.filters[class] = append(s.filters[class], f)
 }
@@ -277,39 +232,43 @@ func (s *Session) deliverReport(class string, report interface{}) {
 	}
 }
 
-// Stop stops rpc client. Stopped client can be started again.
-func (s *Session) Stop() {
-	if s.clientStopChan == nil {
-		panic("gpsd: the client must be started before stopping it")
-	}
-	close(s.clientStopChan)
-	s.clientStopChan = nil
-}
+func (s *Session) watch() {
+	fmt.Println("WATCHING")
 
-func watch(done chan bool, s *Session) {
 	// We're not using a JSON decoder because we first need to inspect
 	// the JSON string to determine it's "class"
+L:
 	for {
-		if line, err := s.reader.ReadString('\n'); err == nil {
-			var reportPeek GPSDReport
-			lineBytes := []byte(line)
-			if err = json.Unmarshal(lineBytes, &reportPeek); err == nil {
-				if len(s.filters[reportPeek.Class]) == 0 {
-					continue
-				}
+		select {
+		case <-s.shutdownChan:
+			println("SHUTTING DOWN WATCH LOOP")
+			break L
+		case <-s.closeWatchChan:
+		default:
+			if line, err := s.reader.ReadString('\n'); err == nil {
+				var reportPeek GPSDReport
+				lineBytes := []byte(line)
+				if err = json.Unmarshal(lineBytes, &reportPeek); err == nil {
+					if len(s.filters[reportPeek.Class]) == 0 {
+						continue
+					}
 
-				if report, err := unmarshalReport(reportPeek.Class, lineBytes); err == nil {
-					s.deliverReport(reportPeek.Class, report)
+					if report, err := unmarshalReport(reportPeek.Class, lineBytes); err == nil {
+						s.deliverReport(reportPeek.Class, report)
+					} else {
+						fmt.Println("JSON parsing error 2:", err)
+					}
 				} else {
-					fmt.Println("JSON parsing error 2:", err)
+					fmt.Println("JSON parsing error:", err)
 				}
 			} else {
-				fmt.Println("JSON parsing error:", err)
+				println("READ ERROR")
+				fmt.Println("Stream reader error:", err)
 			}
-		} else {
-			fmt.Println("Stream reader error:", err)
 		}
 	}
+	println("CLOSE WATCHING")
+	// s.closeWaitChan <- true
 }
 
 func unmarshalReport(class string, bytes []byte) (interface{}, error) {

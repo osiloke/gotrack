@@ -1,7 +1,7 @@
 package component
 
 import (
-	"github.com/trustmaster/goflow"
+	flow "github.com/trustmaster/goflow"
 )
 
 const (

@@ -21,20 +21,22 @@
 package cmd
 
 import (
-	"git.progwebtech.com/osiloke/gotrack/component"
 	"git.progwebtech.com/osiloke/gotrack/gpsd"
+	"git.progwebtech.com/osiloke/gotrack/service"
 	"github.com/mgutz/logxi/v1"
 	dostow "github.com/osiloke/dostow-contrib/store"
 	"github.com/osiloke/gostore"
 	"github.com/spf13/cobra"
-	"os"
 )
 
 var (
 	gpsdURI     string
 	groupKey    string
+	dostowUri   string
 	storageMode string
 	deviceID    string
+	storePath   string
+	logger      = log.New("[gps]")
 )
 
 // gpsCmd represents the gps command
@@ -48,38 +50,26 @@ Cobra is a CLI library for Go that empowers applications.
 This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		var s gostore.ObjectStore
-		if storageMode == "local" {
-			s = gostore.NewBoltDatabaseStore("./gotrack.db")
-		} else {
-			s = dostow.NewStore("https://worksmart.progwebtech.com/v1", groupKey)
-		}
-		gps, err := gpsd.Dial(gpsdURI)
-		if err != nil {
-			os.Exit(-1)
-		}
-
-		in := make(chan interface{})
-		gpsComponent := component.NewComponent("gps", func(val interface{}, out chan<- interface{}) error {
-			storedReport := gpsd.TPVToGeoJSON(val.(*gpsd.TPVReport))
-			storedReport["deviceID"] = deviceID
-			k, err := s.Save("geo", storedReport)
+		var (
+			err   error
+			store gostore.ObjectStore
+		)
+		if storageMode == "bolt" {
+			store, err = gostore.NewBoltObjectStore(storePath + ".bolt")
 			if err != nil {
-				log.Warn("report not saved", "report", storedReport, "err", err.Error())
-				return err
+				logger.Info("unable to create bolt store", "err", err)
 			}
-			log.Debug("gps report", "key", k, "Report", storedReport)
-			return nil
-		})
-		gpsNet := component.NewLinearGraph(in, gpsComponent)
-
-		gps.AddFilter("TPV", func(r interface{}) {
-			in <- r
-		})
-		done := gps.Watch()
-
-		<-done
-		<-gpsNet.Wait()
+		} else if storageMode == "scribble" {
+			store = gostore.NewScribbleStore(storePath + ".scribble")
+		} else {
+			store = dostow.NewStore("https://worksmart.progwebtech.com/v1", groupKey)
+		}
+		sensor := service.NewGpsService(store, gpsdURI, deviceID)
+		api := service.NewApiService(store, sensor, ":8000")
+		go api.Run()
+		go sensor.Run()
+		select {}
+		logger.Info("exiting")
 	},
 }
 
@@ -92,8 +82,9 @@ func init() {
 	// and all subcommands, e.g.:
 	gpsCmd.Flags().StringVarP(&groupKey, "key", "k", "test", "Group access key")
 	gpsCmd.Flags().StringVarP(&gpsdURI, "gpsd", "g", gpsd.DefaultAddress, "Gpsd uri")
-	gpsCmd.Flags().StringVarP(&storageMode, "storage", "s", "local", "switches storage mode")
+	gpsCmd.Flags().StringVarP(&storageMode, "storage", "s", "scribble", "switches storage mode")
 	gpsCmd.Flags().StringVarP(&deviceID, "id", "d", "gotrack1", "id of this device")
+	gpsCmd.Flags().StringVarP(&storePath, "path", "p", "./gotrack.scrible", "id of this device")
 
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:

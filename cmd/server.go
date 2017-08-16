@@ -26,10 +26,11 @@ import (
 	"time"
 
 	"github.com/everdev/mack"
-	"github.com/hybridgroup/gobot"
-	"github.com/hybridgroup/gobot/platforms/firmata"
-	"github.com/hybridgroup/gobot/platforms/gpio"
 	"github.com/spf13/cobra"
+	"gobot.io/x/gobot"
+	"gobot.io/x/gobot/drivers/aio"
+	"gobot.io/x/gobot/drivers/gpio"
+	"gobot.io/x/gobot/platforms/firmata"
 
 	"git.progwebtech.com/osiloke/gotrack/process"
 )
@@ -39,17 +40,17 @@ func setupArduino() *gobot.Robot {
 	pCtrl := process.NewPowerControl(true)
 
 	device := findArduino()
-	arduino := firmata.NewFirmataAdaptor("arduino", device)
-	statusLed := gpio.NewLedDriver(arduino, "led", "13")
-	powerButton := gpio.NewButtonDriver(arduino, "powerButton", "2")
-	voltageMeasure := gpio.NewAnalogSensorDriver(arduino, "vin", "0")
+	arduino := firmata.NewAdaptor(device)
+	statusLed := gpio.NewLedDriver(arduino, "13")
+	powerButton := gpio.NewButtonDriver(arduino, "2")
+	voltageMeasure := aio.NewAnalogSensorDriver(arduino, "0")
 
 	log.Println(time.Now().String())
 	work := func() {
-		gobot.On(powerButton.Event("push"), func(data interface{}) {
+		arduino.On(powerButton.Event("push"), func(data interface{}) {
 			log.Println("power button pushed")
 		})
-		gobot.On(powerButton.Event("release"), func(data interface{}) {
+		arduino.On(powerButton.Event("release"), func(data interface{}) {
 			log.Println("power button released")
 			pCtrl.In("release")
 
@@ -57,7 +58,7 @@ func setupArduino() *gobot.Robot {
 		gobot.Every(1*time.Second, func() {
 			statusLed.Toggle()
 		})
-		gobot.On(voltageMeasure.Event("data"), func(data interface{}) {
+		arduino.On(voltageMeasure.Event("data"), func(data interface{}) {
 			// _data := data.(int)
 			// vin := uint8(
 			//   gobot.ToScale(gobot.FromScale(float64(_data), 0, 1023), 0, 5),
@@ -88,7 +89,7 @@ to quickly create a Cobra application.`,
 		// TODO: Work your own magic here
 		fmt.Println("server called")
 
-		gbot := gobot.NewGobot()
+		gbot := gobot.NewMaster()
 		gbot.AddRobot(setupArduino())
 
 		mack.Notify("Bot is running")
