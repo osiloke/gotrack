@@ -12,10 +12,10 @@ func init() {
 func TPVToGeoJSON(report *TPVReport) (jsonReport map[string]interface{}) {
 	jsonReport = structs.Map(report)
 	jsonReport["location"] = map[string]interface{}{
-		"latitude":  jsonReport["Lat"],
-		"longitude": jsonReport["Lon"],
+		"latitude":  report.Lat,
+		"longitude": report.Lon,
 	}
-	delete(jsonReport, "Lat")
-	delete(jsonReport, "Lon")
+	delete(jsonReport, "lat")
+	delete(jsonReport, "lon")
 	return
 }

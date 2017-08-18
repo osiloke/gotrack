@@ -30,6 +30,7 @@ import (
 )
 
 var (
+	pingPeriod  int
 	gpsdURI     string
 	groupKey    string
 	dostowUri   string
@@ -64,7 +65,7 @@ to quickly create a Cobra application.`,
 		} else {
 			store = dostow.NewStore("https://worksmart.progwebtech.com/v1", groupKey)
 		}
-		sensor := service.NewGpsService(store, gpsdURI, deviceID)
+		sensor := service.NewGpsService(store, gpsdURI, deviceID, pingPeriod)
 		api := service.NewApiService(store, sensor, ":8000")
 		go api.Run()
 		go sensor.Run()
@@ -80,11 +81,12 @@ func init() {
 
 	// Cobra supports Persistent Flags which will work for this command
 	// and all subcommands, e.g.:
+	gpsCmd.Flags().IntVarP(&pingPeriod, "ping-period", "r", 10, "Ping Period")
 	gpsCmd.Flags().StringVarP(&groupKey, "key", "k", "test", "Group access key")
 	gpsCmd.Flags().StringVarP(&gpsdURI, "gpsd", "g", gpsd.DefaultAddress, "Gpsd uri")
 	gpsCmd.Flags().StringVarP(&storageMode, "storage", "s", "scribble", "switches storage mode")
 	gpsCmd.Flags().StringVarP(&deviceID, "id", "d", "gotrack1", "id of this device")
-	gpsCmd.Flags().StringVarP(&storePath, "path", "p", "./gotrack.scrible", "id of this device")
+	gpsCmd.Flags().StringVarP(&storePath, "path", "p", "./gotrack", "id of this device")
 
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
