@@ -76,7 +76,7 @@ func init() {
 	// and all subcommands, e.g.:
 	gpsService.Flags().IntVarP(&pingPeriod, "ping-period", "r", 10, "Ping Period")
 	gpsService.Flags().StringVarP(&groupKey, "key", "k", "test", "Group access key")
-	gpsService.Flags().StringVarP(&dostowUri, "dostowUri", "u", "https://worksmart.progwebtech.com/v1", "dostow Uri")
+	gpsService.Flags().StringVarP(&dostowUri, "dostowUri", "u", "https://cloud.dostow.com/v1/", "dostow Uri")
 	gpsService.Flags().StringVarP(&gpsdURI, "gpsd", "g", gpsd.DefaultAddress, "Gpsd uri")
 	gpsService.Flags().StringVarP(&storageMode, "storage", "s", "scribble", "switches storage mode")
 	gpsService.Flags().StringVarP(&deviceID, "id", "d", "gotrack1", "id of this device")
